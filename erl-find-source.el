@@ -66,21 +66,17 @@ If only MOD is nil then return FUN/ARITY."
 
 (defun erlfs-parse-mfa (string &optional default-module)
   "Parse MFA from a string using `erlfs-mfa-at-point'."
-  (when (null default-module) (setq default-module (erlfs-buffer-module-name)))
+  (when (null default-module) (setq default-module (erlang-get-module)))
   (with-temp-buffer
     (with-syntax-table erlang-mode-syntax-table
       (insert string)
       (goto-char (point-min))
       (erlfs-mfa-at-point default-module))))
 
-(defun erlfs-buffer-module-name ()
-  "Return the current buffer's module name, or nil."
-  (erlang-get-module))
-
 (defun erlfs-mfa-at-point (&optional default-module)
   "Return the module, function, arity of the function reference at point.
 If not module-qualified then use DEFAULT-MODULE."
-  (when (null default-module) (setq default-module (erlfs-buffer-module-name)))
+  (when (null default-module) (setq default-module (erlang-get-module)))
   (save-excursion
     (erlfs-goto-end-of-call-name)
     (let ((arity (erlfs-arity-at-point))
@@ -195,10 +191,24 @@ When FUNCTION is specified, the point is moved to its start."
                         (setq patterns (cdr patterns))))))
              found)))))
 
-(defun erlfs-search-function (name arity &optional type)
+(defun erlfs-search-identifier (id)
+  "Goto the definition of the identifier in the current buffer.
+Value is non-nil if search is successful."
+  (let ((kind (erlang-id-kind id))
+        (name (erlang-id-name id))
+        (arity (erlang-id-arity id)))
+    (cond
+     ((eq kind 'record)
+      (erlfs-search-record name))
+     ((eq kind 'macro)
+      (erlfs-search-macro name))
+     (t
+      (erlfs-search-function name arity)))))
+
+(defun erlfs-search-function (name arity)
   "Goto the definition of NAME/ARITY in the current buffer.
 Value is non-nil if search is successful."
-  (let ((re (concat "^" (and type "-type\\s-*") (regexp-quote name) "\\s-*("))
+  (let ((re (concat "^" (regexp-quote name) "\\s-*("))
         found)
     (save-excursion
       (goto-char (point-min))
@@ -208,15 +218,33 @@ Value is non-nil if search is successful."
         (when (or (null arity) (eq (erlfs-arity-at-point) arity))
           (setq found (line-beginning-position)))))
     (cond
-     (found (goto-char found))
-     ((and arity (not type))
+     (found
+      (goto-char found))
+     (arity
       (message "Function %s/%s not found; ignoring arity..."
                name arity)
-      (erlfs-search-function name nil nil))
-     ((not type)
-      (message "Searching type definition...")
-      (erlfs-search-function name 0 t))
-     (t (message "Couldn't find function or type %S" name)
+      (erlfs-search-function name nil))
+     (t
+      (message "Couldn't find function %S" name)
+      nil))))
+
+(defun erlfs-search-record (name)
+  (erlfs-search-directive "record" name))
+
+(defun erlfs-search-macro (name)
+  (erlfs-search-directive "define" name))
+
+(defun erlfs-search-directive (directive name)
+  (let ((re (concat "^-" directive "\\s-*(" (regexp-quote name) "\\s-*,"))
+        found)
+    (save-excursion
+      (goto-char (point-min))
+      (cond
+       ((re-search-forward re nil t)
+        (setq found (line-beginning-position)))))
+    (cond
+     (found (goto-char found))
+     (t (message "Couldn't find %S %S" directive name)
         nil))))
 
 (defun erlfs-read-symbol-or-nil (prompt)
