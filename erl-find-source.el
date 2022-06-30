@@ -225,17 +225,21 @@ Value is non-nil if search is successful."
                name arity)
       (erlfs-search-function name nil))
      (t
-      (message "Couldn't find function %S" name)
+      (erlfs-search-identifier (erlang-get-identifier-at-point))
+      ;; (message "Couldn't find function %S" name)
       nil))))
 
 (defun erlfs-search-record (name)
-  (erlfs-search-directive "record" name))
+  (if (eq (erlfs-search-directive "record" name) nil)
+      (erlfs-search-remote-directive "record" name)))
 
 (defun erlfs-search-macro (name)
-  (erlfs-search-directive "define" name))
+  (if (eq (erlfs-search-directive "define" name) nil)
+      (erlfs-search-remote-directive "define" name)))
 
 (defun erlfs-search-directive (directive name)
-  (let ((re (concat "^-" directive "\\s-*(" (regexp-quote name) "\\s-*,"))
+  (let ((re (concat "^-"
+                    directive "\\s-*(\\s-*" (regexp-quote name) "\\s-*[\\(\\|,]"))
         found)
     (save-excursion
       (goto-char (point-min))
@@ -246,13 +250,6 @@ Value is non-nil if search is successful."
      (found (goto-char found))
      (t (message "Couldn't find %S %S" directive name)
         nil))))
-
-(defun erlfs-read-symbol-or-nil (prompt)
-  "Read a symbol, or NIL on empty input."
-  (let ((s (read-string prompt)))
-    (if (string= s "")
-        nil
-      (intern s))))
 
 (defun erlfs-find-callers ()
   "Uses `grep` to find callers of the function at point."
@@ -271,5 +268,26 @@ Value is non-nil if search is successful."
     (symbol-at-point)
     (string-join erlfs-search-patterns " ")
     (symbol-at-point))))
+
+(defun debug-search-identifier ()
+  (interactive)
+  (erlfs-search-identifier (erlang-get-identifier-at-point)))
+
+(defun erlfs-search-remote-directive (directive name)
+  (let ((file-name (car (erlfs-grep-directive directive name))))
+    (if file-name
+        (progn
+          (switch-to-buffer (find-file-noselect file-name nil nil))
+          (erlfs-search-directive directive name))
+      (message "Couldn't open buffer %S" file-name))))
+
+;; code by plux:
+(defun erlfs-grep-directive (directive name)
+  (let ((matches (split-string
+                  (shell-command-to-string
+                   (format "rg \"\\-%s\\(\s*%s\s*[\\(\\|,]\" -l ../../"
+                           directive (regexp-quote name)))
+                  "\n")))
+    (remove "" matches)))
 
 (provide 'erl-find-source)
